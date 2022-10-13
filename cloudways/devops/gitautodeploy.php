@@ -9,16 +9,16 @@
 */
 
 // The CloudWays API key
-const API_KEY = "li0k37LiWX3W0ZiTWuAPFPMzYOVmFN";
+const API_KEY = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
 
 // The CloudWays API URL, this usually doesn't change
 const API_URL = "https://api.cloudways.com/api/v1";
 
 // Your registered CloudWays Email Address (note this should be the account of the root owner)
-const EMAIL = "prumple@aws.somee.social";
+const EMAIL = "AAAAAAAAAAA@BBBBBBB.CCCCCCCC";
 
 // The desired Git Repository URL
-const GIT_URL = "git@github.com:MortgageLabs/ML-Website.git";
+const GIT_URL = "git@github.com:YOUR_REPOSITORY_URL.git";
 
 /* ----------------------------------------------------------------
 * NEEDED FILES
