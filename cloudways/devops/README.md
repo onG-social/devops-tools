@@ -24,6 +24,7 @@ This script will allow you to deploy to the various applications you have on Clo
 
 ## Setting up Cloudways
 - For each application that you have that you wish to auto deploy to, make sure you label them with the branch id you have in github
+- Make sure you go to each application and setup the Git Deployment as well - you need to add the SSH key from each environment to your GitHub, else CloudWays will NOT be able to actually work properly. You can check here: https://support.cloudways.com/en/articles/5124087-deploy-code-to-your-application-using-git
 
 So for example, if you have 3 applications and one master application: 
 **Server 1**: Production - has one application, the production application
