@@ -20,15 +20,6 @@ const EMAIL = "AAAAAAAAAAA@BBBBBBB.CCCCCCCC";
 // The desired Git Repository URL
 const GIT_URL = "git@github.com:YOUR_REPOSITORY_URL.git";
 
-// Who all should we allow to auto push to production?
-const GIT_ADMINS = ['GIT_USERNAME', 'GIT_USERNAME2'];
-
-// What is the name of your production branch?
-const PRODUCTION_BRANCH_NAME = 'master';
-
-// What is the name of your production application?
-const PRODUCTION_APPLICATION_NAME = 'Production';
-
 // If you have flyway configured, and running on the server
 // then set this to yes, if you wish to run the migrations
 const SHOULD_USE_FLYWAY = false;
@@ -38,8 +29,13 @@ const SHOULD_USE_FLYWAY = false;
 // LEAVE THE TRAILING SLASH OFF
 const FLYWAY_EXEC_LOCATION = '/home/master/flyway';
 
-// flyway configuration location
-const FLYWAY_CONFIG_FILE = '/home/master/production.cnf';
+// flyway configuration location (note, this is a json object)
+// your first object should be the name of the branch/application
+// your objects value should be the name of the configuration file
+const FLYWAY_CONFIG_FILE = json_encode('{
+    "dev-env-1": "/home/master/dev1.cnf",
+    "staging": "/home/master/staging.cnf",
+}');
 
 /* ----------------------------------------------------------------
 * NEEDED FILES
@@ -141,11 +137,6 @@ $payload = json_decode($json);
 // fetch the branch by getting rid of the ref/heads
 $branch = str_replace('refs/heads/', '', $payload->ref);
 
-// check if this is actually the production branch
-if ($branch !== PRODUCTION_BRANCH_NAME) {
-  die("we only handle the production branch!");
-}
-
 echo "Branch in question: " . $branch;
 
 //Fetch Access Token
@@ -173,14 +164,6 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
         break;
     // handle pushes to the branches
     case 'push':
-        // because this is for PRODUCTION pushes, we need to know if the person
-        // pushing this is authorized to push
-        // so check the array
-        $whoPushed = $payload->pusher->name;
-        if (!in_array($whoPushed, GIT_ADMINS)) {
-            die("not authorized to push to production! user:" . $whoPushed);
-        }
-
         // because push events are important, we need to know if the branch
         // we are being sent is a branch we can push too locally
         // first we need to check our applications array for the proper ID
@@ -198,7 +181,7 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
             $success = false;
             foreach ($server->apps as $app) {
                 echo "\nlooking at app: " . $app->label;
-                if ($app->label == PRODUCTION_APPLICATION_NAME) {
+                if ($app->label == $branch) {
                     $appId = $app->id;
                     $serverId = $server->id;
                     $success = true;
@@ -213,9 +196,9 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
 
         // do we have any apps and servers?
         if ($serverId == 0 || $appId == 0) {
-            die("\nApp not found that matches our production application name, skipping!");
+            die("\nApp not found that matches our branch, skipping!");
         } else {
-            echo "\nApp found that matches our production application name, publishing! \nID: " . $appId . " On server: " . $serverId;
+            echo "\nApp found that matches our branch, publishing! \nID: " . $appId . " On server: " . $serverId;
         }
 
         // now that we know our app and server Id we can push to it
@@ -226,53 +209,59 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
             'branch_name' => $branch
         ]);
 
+
         // should we do migrations using flyway?
         if (SHOULD_USE_FLYWAY) {
 
-          $done = false;
-          $error = false;
-          $errorMessage = '';
-          while (!$done) {
-            $gitHistoryResponse = callCloudWaysAPI('POST', '/git/history', $accessToken, [
-              'server_id' => $serverId,
-              'app_id' => $appId
-            ]);
+            $done = false;
+            $error = false;
+            $errorMessage = '';
+            while (!$done) {
+                $gitHistoryResponse = callCloudWaysAPI('POST', '/git/history', $accessToken, [
+                        'server_id' => $serverId,
+                        'app_id' => $appId
+                    ]);
 
-            // check if the result is '1' - which means the command was successfully set to the server
-            // check if the description isn't set - which means the deploy was successful
-            if ($gitHistoryResponse->logs[0]->result == '1' && $gitHistoryResponse->logs[0]->dscription == "") {
-              $error = false;
-              $done = true;
+                // check if the result is '1' - which means the command was successfully set to the server
+                // check if the description isn't set - which means the deploy was successful
+                if ($gitHistoryResponse->logs[0]->result == '1' && $gitHistoryResponse->logs[0]->dscription == "") {
+                    $error = false;
+                    $done = true;
+                }
 
+                // check if the result is a failure, if it is quit the while loop
+                if ($gitHistoryResponse->logs[0]->result == '-1') {
+                    $error = true;
+                    $errorMessage = $gitHistoryResponse->logs[0]->description;
+                    $done = true;
+                }
+
+                // sleep 4 seconds, and try again
+                sleep(4);
             }
 
-            // check if the result is a failure, if it is quit the while loop
-            if ($gitHistoryResponse->logs[0]->result == '-1') {
-              $error = true;
-              $errorMessage = $gitHistoryResponse->logs[0]->description;
-              $done = true;
+            if ($error) {
+                echo "\n Push completed, but pull didn't deploy: " . $errorMessage;
+                header('HTTP/1.0 201 Created');
             }
 
-            // sleep 4 seconds, and try again
-            sleep(4);
-          }
+            // find the config file to use for flwyay
+            $configFileFlyway = json_decode(FLYWAY_CONFIG_FILE)->{ $branch};
+            if ($configFileFlyway == null || $configFileFlyway = '') {
+                die("unable to find the config file for branch: " . $branch);
+            }
 
-          if ($error) {
-            echo "\n Push completed, but pull didn't deploy: ".$errorMessage;
-            header('HTTP/1.0 201 Created');
-          }
+            // execute migration script
+            $output = null;
+            $retval = null;
+            exec(FLYWAY_EXEC_LOCATION . '/flyway -configFile=' . $configFileFlyway, $output, $retval);
 
-          // execute migration script
-          $output=null;
-          $retval=null;
-          exec(FLYWAY_EXEC_LOCATION . '/flyway -configFile='.FLYWAY_CONFIG_FILE, $output, $retval);
-
-          if (!$retVal) {
-            echo json_encode("{ 'data': '".$output."'}");
-            die("failed to run flway migration!");
-          }
-
+            if (!$retVal) {
+                echo json_encode("{ 'data': '" . $output . "'}");
+                die("failed to run flway migration!");
+            }
         }
+
 
         // we'll die if the above doesn't parse properly anyway
         // so now just return the response to github
