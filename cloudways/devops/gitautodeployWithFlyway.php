@@ -40,6 +40,18 @@ const FLYWAY_CONFIG_FILE = [
     "staging" =>  "/home/master/flyway/conf/staging.cnf"
 ];
 
+// what log file should we use?
+// note, you should have permissions setup for this
+const LOG_FILE = "log.log";
+
+// logging is enabled by default
+const SHOULD_LOG = true;
+
+function log($message) {
+    echo "\n".$message;
+    error_log("\n" . $message, 3, LOG_FILE);
+}
+
 /* ----------------------------------------------------------------
 * NEEDED FILES
 * ----------------------------------------------------------------
@@ -70,13 +82,14 @@ $hookSecret = GITHUB_WEBHOOK_SECRET;
 
 // handle errors
 set_error_handler(function ($severity, $message, $file, $line) {
+    log($message);
     throw new \ErrorException($message, 0, $severity, $file, $line);
 });
 
 // handle exceptions
 set_exception_handler(function ($e) {
     header('HTTP/1.1 500 Internal Server Error');
-    echo "Error on line {$e->getLine()}: " . htmlSpecialChars($e->getMessage());
+    log("Error on line {$e->getLine()}: " . htmlSpecialChars($e->getMessage()));
     die();
 });
 
@@ -87,8 +100,10 @@ $rawPost = NULL;
 if ($hookSecret !== NULL) {
     // verify if this comes from the github process
     if (!isset($_SERVER['HTTP_X_HUB_SIGNATURE'])) {
+        log("HTTP header 'X-Hub-Signature' is missing.");
         throw new \Exception("HTTP header 'X-Hub-Signature' is missing.");
     } elseif (!extension_loaded('hash')) {
+        log("Missing 'hash' extension to check the secret code validity.");
         // verify if we have the hash extension loaded, which is critical
         throw new \Exception("Missing 'hash' extension to check the secret code validity.");
     }
@@ -97,6 +112,7 @@ if ($hookSecret !== NULL) {
 
     // check if we can decrypt the signature
     if (!in_array($algo, hash_algos(), TRUE)) {
+        log("Hash algorithm '$algo' is not supported.");
         throw new \Exception("Hash algorithm '$algo' is not supported.");
     }
 
@@ -105,14 +121,17 @@ if ($hookSecret !== NULL) {
 
     // if the secrets don't match quit
     if (!hash_equals($hash, hash_hmac($algo, $rawPost, $hookSecret))) {
+        log('Hook secret does not match.');
         throw new \Exception('Hook secret does not match.');
     }
 }
 
 // if content type isn't set, then quit, because we don't know how to read the payload
 if (!isset($_SERVER['CONTENT_TYPE'])) {
+    log("Missing HTTP 'Content-Type' header.");
     throw new \Exception("Missing HTTP 'Content-Type' header.");
 } elseif (!isset($_SERVER['HTTP_X_GITHUB_EVENT'])) {
+    log("Missing HTTP 'X-Github-Event' header.");
     // if it's not a github event, quit
     throw new \Exception("Missing HTTP 'X-Github-Event' header.");
 }
@@ -129,6 +148,7 @@ switch ($_SERVER['CONTENT_TYPE']) {
         $json = $_POST['payload'];
         break;
     default:
+        log("Unsupported content type: $_SERVER[CONTENT_TYPE]");
         // we don't handle any other types, and Github doesn't send any other types
         throw new \Exception("Unsupported content type: $_SERVER[CONTENT_TYPE]");
 }
@@ -140,7 +160,7 @@ $payload = json_decode($json);
 // fetch the branch by getting rid of the ref/heads
 $branch = str_replace('refs/heads/', '', $payload->ref);
 
-echo "Branch in question: " . $branch;
+log("Branch in question: " . $branch);
 
 //Fetch Access Token
 $tokenResponse = callCloudwaysAPI(
@@ -175,15 +195,16 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
 
         // if the return from Cloudways isn't passing, then quit
         if ($servers->status !== true) {
+            log("no servers!");
             die("no servers!");
         }
 
         // parse for our app and server id
         foreach ($servers->servers as $server) {
-            echo "\nlooking on server: " . $server->label;
+            log("\nlooking on server: " . $server->label);
             $success = false;
             foreach ($server->apps as $app) {
-                echo "\nlooking at app: " . $app->label;
+                log("\nlooking at app: " . $app->label);
                 if ($app->label == $branch) {
                     $appId = $app->id;
                     $serverId = $server->id;
@@ -199,8 +220,10 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
 
         // do we have any apps and servers?
         if ($serverId == 0 || $appId == 0) {
+            log("App not found that matches our branch, skipping!");
             die("\nApp not found that matches our branch, skipping!");
         } else {
+            log("App found that matches our branch, publishing! \nID: " . $appId . " On server: " . $serverId);
             echo "\nApp found that matches our branch, publishing! \nID: " . $appId . " On server: " . $serverId;
         }
 
@@ -220,18 +243,21 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
             $error = false;
             $errorMessage = '';
             while (!$done) {
-                $gitHistoryResponse = callCloudWaysAPI('POST', '/git/history', $accessToken, [
+                log("Fetching deployment status...");
+                $gitHistoryResponse = callCloudWaysAPI('GET', '/git/history', $accessToken, [
                         'server_id' => $serverId,
                         'app_id' => $appId
                     ]);
 
-                echo "\n Waiting Result: " . $gitHistoryResponse->logs[0]->result;
+                log("\n Waiting Result: " . $gitHistoryResponse->logs[0]->result);
 
                 // check if the result is '1' - which means the command was successfully set to the server
                 // check if the description isn't set - which means the deploy was successful
                 if ($gitHistoryResponse->logs[0]->result == '1' && $gitHistoryResponse->logs[0]->dscription == "") {
                     $error = false;
                     $done = true;
+                    log("Success! Deployment finished!");
+                    break;
                 }
 
                 // check if the result is a failure, if it is quit the while loop
@@ -239,6 +265,7 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
                     $error = true;
                     $errorMessage = $gitHistoryResponse->logs[0]->description;
                     $done = true;
+                    log("Failure! Deployment Failed!");
                 }
 
                 // sleep 4 seconds, and try again
@@ -246,13 +273,14 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
             }
 
             if ($error) {
-                echo "\n Push completed, but pull didn't deploy: " . $errorMessage;
+                log("\n Push completed, but pull didn't deploy: " . $errorMessage);
                 header('HTTP/1.0 201 Created');
             }
 
             // find the config file to use for flwyay
             $configFileFlyway = json_decode(FLYWAY_CONFIG_FILE)->{ $branch};
             if ($configFileFlyway == null || $configFileFlyway = '') {
+                log("unable to find the config file for branch: " . $branch);
                 die("unable to find the config file for branch: " . $branch);
             }
 
@@ -262,7 +290,7 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
             exec(FLYWAY_EXEC_LOCATION . '/flyway -configFile=' . $configFileFlyway, $output, $retval);
 
             if (!$retVal) {
-                echo json_encode("{ 'data': '" . $output . "'}");
+                log(json_encode("{ 'data': '" . $output . "'}"));
                 die("failed to run flway migration!");
             }
         }
@@ -270,12 +298,13 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
 
         // we'll die if the above doesn't parse properly anyway
         // so now just return the response to github
-        echo "\n" . json_encode($gitPullResponse);
+        log(json_encode($gitPullResponse));
         header('HTTP/1.0 200 OK');
 
         break;
     default:
         // let github know we don't handle other requests currently
+        log('HTTP/1.0 404 Not Found');
         header('HTTP/1.0 404 Not Found');
         die();
 }
@@ -316,7 +345,10 @@ function callCloudwaysAPI($method, $url, $accessToken, $post = [])
     $output = curl_exec($ch);
     $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     if ($httpcode != '200') {
+        log('\nAn error occurred at CloudWays API Call code: ' . $httpcode . ' output: ' . substr($output, 0, 10000));
         die('\nAn error occurred at CloudWays API Call code: ' . $httpcode . ' output: ' . substr($output, 0, 10000));
+    } else {
+        log("Success: " + $httpcode);
     }
     curl_close($ch);
     return json_decode($output);
