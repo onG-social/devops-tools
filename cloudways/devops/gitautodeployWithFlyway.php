@@ -225,6 +225,8 @@ switch (strtolower($_SERVER['HTTP_X_GITHUB_EVENT'])) {
                         'app_id' => $appId
                     ]);
 
+                echo "\n Waiting Result: " . $gitHistoryResponse->logs[0]->result;
+
                 // check if the result is '1' - which means the command was successfully set to the server
                 // check if the description isn't set - which means the deploy was successful
                 if ($gitHistoryResponse->logs[0]->result == '1' && $gitHistoryResponse->logs[0]->dscription == "") {
@@ -314,7 +316,7 @@ function callCloudwaysAPI($method, $url, $accessToken, $post = [])
     $output = curl_exec($ch);
     $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     if ($httpcode != '200') {
-        die('An error occurred code: ' . $httpcode . ' output: ' . substr($output, 0, 10000));
+        die('\nAn error occurred at CloudWays API Call code: ' . $httpcode . ' output: ' . substr($output, 0, 10000));
     }
     curl_close($ch);
     return json_decode($output);
