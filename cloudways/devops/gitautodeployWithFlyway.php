@@ -32,10 +32,13 @@ const FLYWAY_EXEC_LOCATION = '/home/master/flyway';
 // flyway configuration location (note, this is a json object)
 // your first object should be the name of the branch/application
 // your objects value should be the name of the configuration file
-const FLYWAY_CONFIG_FILE = json_encode('{
-    "dev-env-1": "/home/master/dev1.cnf",
-    "staging": "/home/master/staging.cnf",
-}');
+const FLYWAY_CONFIG_FILE = [
+    "dev-env-1" => "/home/master/flyway/conf/dev1.cnf",
+    "dev-env-2" => "/home/master/flyway/conf/dev2.cnf",
+    "dev-env-3" => "/home/master/flyway/conf/dev3.cnf",
+    "dev-env-4" => "/home/master/flyway/conf/dev4.cnf",
+    "staging" =>  "/home/master/flyway/conf/staging.cnf"
+];
 
 /* ----------------------------------------------------------------
 * NEEDED FILES
